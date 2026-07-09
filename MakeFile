@@ -1,0 +1,23 @@
+# Makefile для сборки out-of-tree модуля ядра под Arch Linux (kbuild)
+
+obj-m += nv_fermi_drv.o
+
+KDIR := /lib/modules/$(shell uname -r)/build
+PWD  := $(shell pwd)
+
+all:
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
+
+clean:
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+
+load:
+	sudo insmod nv_fermi_drv.ko
+
+unload:
+	sudo rmmod nv_fermi_drv
+
+log:
+	sudo dmesg -w | grep nv_fermi_drv
+
+.PHONY: all clean load unload log
