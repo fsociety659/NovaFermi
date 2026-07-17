@@ -1,108 +1,108 @@
-# nv-fermi-drv
+# NovaFermi
 
-Независимый out-of-tree модуль ядра Linux (DRM/KMS) для видеокарт архитектуры NVIDIA Fermi, в частности GeForce GT 430 (чип GF108).
+Independent out-of-tree Linux kernel module (DRM/KMS) for NVIDIA Fermi architecture graphics cards, specifically the GeForce GT 430 (GF108 chip).
 
-## Цель проекта
+## Project Goal
 
-Полноценная поддержка карт NVIDIA Fermi на современных ядрах Linux (6.x+) с исправлением ключевых проблем энергопотребления (reclocking), которые не решены в существующем драйвере nouveau для этого поколения железа.
+Full support for NVIDIA Fermi cards on modern Linux kernels (6.x+) with fixes for key power management issues (reclocking) that remain unresolved in the existing nouveau driver for this hardware generation.
 
-## Архитектурные принципы
+## Architectural Principles
 
-- **Изоляция от Nouveau.** Драйвер пишется как самостоятельный модуль на базе стандартного Linux Kernel DRM API, а не как форк кодовой базы nouveau.
-- **Референсный метод.** Кодовая база nouveau и envytools используется исключительно как спецификация и справочник по регистрам MMIO, структурам таблиц VBIOS и алгоритмам шины I2C. Прямого копирования кода нет.
-- **Портативность.** Сборка базируется на DKMS, что обеспечивает переносимость драйвера между дистрибутивами (Arch, Ubuntu, Mint, Fedora).
+- **Isolation from Nouveau.** The driver is written as a standalone module based on the standard Linux Kernel DRM API, rather than as a fork of the nouveau codebase.
+- **Reference Method.** The nouveau codebase and envytools are used exclusively as a specification and reference for MMIO registers, VBIOS table structures, and I2C bus algorithms. No direct code copying is involved.
+- **Portability.** The build is based on DKMS, ensuring driver portability across distributions (Arch, Ubuntu, Mint, Fedora).
 
-## Целевое железо
+## Target Hardware
 
-| Параметр | Значение |
+| Parameter | Value |
 |---|---|
-| Карта | GeForce GT 430 |
-| Чип | GF108 (Fermi) |
+| Card | GeForce GT 430 |
+| Chip | GF108 (Fermi) |
 | Vendor ID | 0x10de |
 | Device ID | 0x0de1 |
 
-## Текущий статус
+## Current Status
 
-Проект находится на этапе Фазы 3 (см. таблицу ниже). Ниже перечислено, что уже реализовано и подтверждено на реальном железе.
+The project is currently at the Phase 3 stage (see table below). Below is a list of what has already been implemented and verified on real hardware.
 
-### Фаза 1 — скелет проекта и детекция железа (завершена)
+### Phase 1 — Project Skeleton and Hardware Detection (Completed)
 
-- Структура репозитория и Makefile для сборки под Arch Linux.
-- Регистрация PCI ID устройства (10de:0de1).
-- Функции загрузки/выгрузки модуля с логированием в dmesg.
-- Перехват устройства у стандартного драйвера ядра подтверждён.
+- Repository structure and Makefile for building under Arch Linux.
+- Registration of the device PCI ID (10de:0de1).
+- Module load/unload functions with logging to dmesg.
+- Device unbinding from the standard kernel driver confirmed.
 
-### Фаза 2 — доступ к памяти карты: MMIO и BAR (завершена)
+### Phase 2 — Card Memory Access: MMIO and BAR (Completed)
 
-- Активация устройства через `pci_enable_device()`.
-- Резервирование регионов через `pci_request_regions()`.
-- Маппинг BAR0 (регистры) и BAR1 (видеопамять) через `pci_ioremap_bar()`.
-- Базовые макросы чтения/записи регистров (`ioread32`/`iowrite32`).
-- Чтение и разбор `NV_PMC_BOOT_0`, подтверждение chipset ID (0xC1 = GF108).
+- Device activation via `pci_enable_device()`.
+- Region reservation via `pci_request_regions()`.
+- Mapping of BAR0 (registers) and BAR1 (vram) via `pci_ioremap_bar()`.
+- Basic register read/write macros (`ioread32`/`iowrite32`).
+- Reading and parsing of `NV_PMC_BOOT_0`, confirming chipset ID (0xC1 = GF108).
 
-### Фаза 3 — парсер VBIOS и шина I2C (в процессе)
+### Phase 3 — VBIOS Parser and I2C Bus (In Progress)
 
-- Локализация и чтение VBIOS через `pci_map_rom()`, проверка сигнатуры option ROM.
-- Парсер таблицы BIT (BIOS Information Table): поиск сигнатуры, разбор заголовка, перечисление всех токенов подсистем.
-- Локализация DCB (Device Configuration Table) через BIT-токен `i` с fallback на легаси-указатель.
-- Разбор заголовка DCB (версия, размер заголовка, количество и размер записей).
-- В процессе: точное определение смещений таблиц GPIO и I2C внутри DCB-заголовка (зависят от версии DCB, верифицируются через hex-dump в dmesg перед декодированием), инициализация I2C/SMBus движка.
+- Localization and reading of VBIOS via `pci_map_rom()`, verifying the option ROM signature.
+- BIT (BIOS Information Table) parser: signature search, header parsing, enumeration of all subsystem tokens.
+- Localization of the DCB (Device Configuration Table) via BIT token `i` with a fallback to the legacy pointer.
+- Parsing of the DCB header (version, header size, number and size of entries).
+- In progress: exact determination of GPIO and I2C table offsets within the DCB header (dependent on the DCB version, verified via hex dump in dmesg before decoding), initialization of the I2C/SMBus engine.
 
-### Фаза 4 — управление питанием и тактовыми частотами (не начата)
+### Phase 4 — Power Management and Clock Speeds (Not Started)
 
-Извлечение PSTATE-профилей, драйвер PWM-контроллера напряжения, управление PLL, демон энергосбережения в пространстве ядра.
+Extraction of PSTATE profiles, driver for the PWM voltage controller, PLL management, kernel-space power-saving daemon.
 
-### Фаза 5 — вывод графики и Mesa Gallium3D (не начата)
+### Phase 5 — Graphics Output and Mesa Gallium3D (Not Started)
 
-Подсистема DRM/KMS, менеджер памяти GEM/TTM, стейт-трекер Mesa Gallium3D в пользовательском пространстве.
+DRM/KMS subsystem, GEM/TTM memory manager, Mesa Gallium3D state tracker in user space.
 
-## Сборка
+## Building
 
-Требуются установленные заголовки текущего ядра.
+Requires installed headers for the current kernel.
 
 ```bash
-git clone <url-репозитория>
+git clone <repository-url>
 cd nv-fermi-drv
 make
 ```
 
-## Загрузка модуля
+## Loading the Module
 
 ```bash
 sudo make load
 ```
 
-Если карта уже занята стандартным драйвером (nouveau), сначала отвяжите устройство:
+If the card is already occupied by the standard driver (nouveau), unbind the device first:
 
 ```bash
 echo "0000:XX:00.0" | sudo tee /sys/bus/pci/drivers/nouveau/unbind
 echo "0000:XX:00.0" | sudo tee /sys/bus/pci/drivers/nv_fermi_drv/bind
 ```
 
-Адрес шины устройства узнать через `lspci -nn | grep 10de`.
+Find the device bus address using `lspci -nn | grep 10de`.
 
-## Просмотр логов
+## Viewing Logs
 
 ```bash
 sudo make log
 ```
 
-или напрямую:
+or directly:
 
 ```bash
 sudo dmesg -w | grep nv_fermi_drv
 ```
 
-## Выгрузка модуля
+## Unloading the Module
 
 ```bash
 sudo make unload
 ```
 
-## Предупреждение
+## Warning
 
-Проект находится на ранней стадии разработки и работает с недокументированным NVIDIA железом на уровне прямого доступа к MMIO и VBIOS. Текущие фазы (1-3) ограничены операциями чтения и не вносят изменений в состояние питания или тактовых частот карты. Начиная с Фазы 4 драйвер будет производить запись в регистры, управляющие напряжением и частотами — использование на этом этапе будет сопровождаться дополнительными предупреждениями и ограничениями безопасности.
+The project is in an early stage of development and interacts with undocumented NVIDIA hardware at the level of direct MMIO and VBIOS access. The current phases (1-3) are limited to read operations and do not make changes to the power or clock frequency state of the card. Starting from Phase 4, the driver will write to registers controlling voltage and frequencies — usage at that stage will be accompanied by additional safety warnings and restrictions.
 
-## Лицензия
+## License
 
 GPL-2.0
