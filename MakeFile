@@ -1,4 +1,4 @@
-# Makefile для сборки out-of-tree модуля ядра под Arch Linux (kbuild)
+# Makefile for building out-of-tree kernel modules under Arch Linux (kbuild)
 
 obj-m += nv_fermi_drv.o
 
