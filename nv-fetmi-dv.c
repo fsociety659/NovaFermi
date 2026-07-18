@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/ctype.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -423,8 +424,8 @@ static void __exit nv_fermi_exit(void) {
 module_init(nv_fermi_init);
 module_exit(nv_fermi_exit);
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("fsociety");
+MODULE_LICENSE("GPL v2");
+MODULE_AUTHOR("eco1kd");
 MODULE_DESCRIPTION(
     "Out-of-tree DRM/KMS skeleton driver for NVIDIA Fermi GF108 (GT 430)");
-MODULE_VERSION("0.1");
+MODULE_VERSION("0.3-alpha");
