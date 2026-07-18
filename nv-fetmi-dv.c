@@ -111,20 +111,23 @@ static int nv_fermi_read_vbios(struct nv_fermi_priv *priv) {
   return 0;
 }
 
-static size_t nv_fermi_find_bit(struct nv_fermi_priv *priv) {
+static int nv_fermi_find_bit(struct nv_fermi_priv *priv, size_t *out_off) {
   size_t i;
 
   if (priv->vbios_len < NV_BIT_SIGNATURE_LEN)
-    return 0;
+    return -ENOENT;
 
   for (i = 0; i <= priv->vbios_len - NV_BIT_SIGNATURE_LEN; i++) {
-    if (memcmp(priv->vbios + i, nv_bit_signature, NV_BIT_SIGNATURE_LEN) == 0)
-      return i;
+    if (memcmp(priv->vbios + i, nv_bit_signature, NV_BIT_SIGNATURE_LEN) == 0) {
+      *out_off = i;
+      return 0;
+    }
   }
-  return 0;
+  return -ENOENT;
 }
 
 #define NV_BIT_MIN_HEADER_SIZE (NV_BIT_SIGNATURE_LEN + 6)
+
 #define NV_BIT_MIN_TOKEN_SIZE 6
 
 static int nv_fermi_parse_bit_header(struct nv_fermi_priv *priv,
@@ -176,12 +179,12 @@ static int nv_fermi_parse_bit_header(struct nv_fermi_priv *priv,
 
 static int nv_fermi_bit_find(struct nv_fermi_priv *priv, u8 id,
                              struct nv_bit_token *out) {
-  size_t bit_off = nv_fermi_find_bit(priv);
   struct nv_bit_header hdr;
+  size_t bit_off;
   size_t tokens_off;
   int i;
 
-  if (!bit_off) {
+  if (nv_fermi_find_bit(priv, &bit_off)) {
     pr_err(DRV_NAME ": BIT signature not found in VBIOS\n");
     return -ENOENT;
   }
@@ -355,6 +358,7 @@ static int nv_fermi_probe(struct pci_dev *pdev,
             ": VBIOS read failed (code %d) -- BIT/DCB parsing skipped\n",
             ret);
   } else {
+
     if (nv_fermi_parse_dcb(priv, &priv->dcb) == 0)
       priv->dcb_valid = true;
     else
@@ -420,7 +424,7 @@ module_init(nv_fermi_init);
 module_exit(nv_fermi_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("eco1kd");
+MODULE_AUTHOR("fsociety");
 MODULE_DESCRIPTION(
     "Out-of-tree DRM/KMS skeleton driver for NVIDIA Fermi GF108 (GT 430)");
 MODULE_VERSION("0.1");
