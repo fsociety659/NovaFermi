@@ -1,6 +1,7 @@
 # Makefile for building out-of-tree kernel modules under Arch Linux (kbuild)
 
 obj-m += nv_fermi_drv.o
+nv_fermi_drv-objs := core.o vbios.o i2c.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD  := $(shell pwd)
