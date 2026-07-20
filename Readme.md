@@ -1,18 +1,18 @@
 # NovaFermi
 
-Independent out-of-tree Linux kernel module (DRM/KMS) for NVIDIA Fermi architecture graphics cards, specifically the GeForce GT 430 (GF108 chip).
+An independent out-of-tree Linux kernel module (DRM/KMS) for NVIDIA Fermi-architecture GPUs, specifically the GeForce GT 430 (GF108 chip).
 
-## Project Goal
+## Goal
 
-Full support for NVIDIA Fermi cards on modern Linux kernels (6.x+) with fixes for key power management issues (reclocking) that remain unresolved in the existing nouveau driver for this hardware generation.
+Full support for NVIDIA Fermi cards on modern Linux kernels (6.x+), fixing key power-management (reclocking) gaps that remain unaddressed in the existing nouveau driver for this generation of hardware.
 
-## Architectural Principles
+## Design principles
 
-- **Isolation from Nouveau.** The driver is written as a standalone module based on the standard Linux Kernel DRM API, rather than as a fork of the nouveau codebase.
-- **Reference Method.** The nouveau codebase and envytools are used exclusively as a specification and reference for MMIO registers, VBIOS table structures, and I2C bus algorithms. No direct code copying is involved.
-- **Portability.** The build is based on DKMS, ensuring driver portability across distributions (Arch, Ubuntu, Mint, Fedora).
+- **Isolation from nouveau.** The driver is written as a standalone module built on the standard Linux Kernel DRM API, not as a fork of the nouveau codebase.
+- **Reference-only approach.** The nouveau and envytools codebases are used strictly as a specification and reference for MMIO registers, VBIOS table structures, and the I2C bus algorithms. No code is copied directly.
+- **Portability.** The build is based on DKMS, ensuring the driver is portable across distributions (Arch, Ubuntu, Mint, Fedora).
 
-## Target Hardware
+## Target hardware
 
 | Parameter | Value |
 |---|---|
@@ -21,44 +21,52 @@ Full support for NVIDIA Fermi cards on modern Linux kernels (6.x+) with fixes fo
 | Vendor ID | 0x10de |
 | Device ID | 0x0de1 |
 
-## Current Status
+## Source layout
 
-The project is currently at the Phase 3 stage (see table below). Below is a list of what has already been implemented and verified on real hardware.
+- `nv_fermi_drv.h` -- shared macros, register defines, data structures (`nv_fermi_priv`, `nv_dcb_header`), function prototypes.
+- `core.c` -- module init/exit, PCI driver registration, probe/remove.
+- `vbios.c` -- VBIOS parsing: expansion ROM read, BIT table, DCB table.
+- `i2c.c` -- GPIO/I2C engine (in progress).
+- `Makefile` -- Kbuild build file, links `core.o vbios.o i2c.o` into `nv_fermi_drv.ko`.
 
-### Phase 1 — Project Skeleton and Hardware Detection (Completed)
+## Current status
 
-- Repository structure and Makefile for building under Arch Linux.
-- Registration of the device PCI ID (10de:0de1).
-- Module load/unload functions with logging to dmesg.
-- Device unbinding from the standard kernel driver confirmed.
+The project is currently in Phase 3 (see the table below).
 
-### Phase 2 — Card Memory Access: MMIO and BAR (Completed)
+### Phase 1 -- project skeleton and hardware detection (complete)
+
+- Repository structure and Makefile for building on Arch Linux.
+- PCI ID registration for the device (10de:0de1).
+- Module load/unload functions with dmesg logging.
+- Confirmed device takeover from the stock kernel driver.
+
+### Phase 2 -- card memory access: MMIO and BAR (complete)
 
 - Device activation via `pci_enable_device()`.
 - Region reservation via `pci_request_regions()`.
-- Mapping of BAR0 (registers) and BAR1 (vram) via `pci_ioremap_bar()`.
+- Mapping of BAR0 (registers) and BAR1 (video memory) via `pci_ioremap_bar()`.
 - Basic register read/write macros (`ioread32`/`iowrite32`).
-- Reading and parsing of `NV_PMC_BOOT_0`, confirming chipset ID (0xC1 = GF108).
+- Reading and decoding `NV_PMC_BOOT_0`, confirming the chipset ID (0xC1 = GF108).
 
-### Phase 3 — VBIOS Parser and I2C Bus (In Progress)
+### Phase 3 -- VBIOS parser and I2C bus (in progress)
 
-- Localization and reading of VBIOS via `pci_map_rom()`, verifying the option ROM signature.
-- BIT (BIOS Information Table) parser: signature search, header parsing, enumeration of all subsystem tokens.
-- Localization of the DCB (Device Configuration Table) via BIT token `i` with a fallback to the legacy pointer.
-- Parsing of the DCB header (version, header size, number and size of entries).
-- In progress: exact determination of GPIO and I2C table offsets within the DCB header (dependent on the DCB version, verified via hex dump in dmesg before decoding), initialization of the I2C/SMBus engine.
+- VBIOS location and read via `pci_map_rom()`, with option ROM signature validation.
+- BIT (BIOS Information Table) parser: signature search, header parsing, enumeration of all subsystem tokens, header checksum check.
+- DCB (Device Configuration Table) location via the BIT token `i`, with a legacy-pointer fallback.
+- DCB header parsing (version, header size, entry count and size).
+- In progress: pinning down the exact offsets of the GPIO and I2C tables inside the DCB header (version-dependent, verified via dmesg hex-dumps before any decoding is trusted), and I2C/SMBus engine initialization.
 
-### Phase 4 — Power Management and Clock Speeds (Not Started)
+### Phase 4 -- power and clock management (reclocking) (not started)
 
-Extraction of PSTATE profiles, driver for the PWM voltage controller, PLL management, kernel-space power-saving daemon.
+Extracting PSTATE performance profiles, writing a PWM voltage-control driver, PLL clock control code, a basic in-kernel power-management daemon.
 
-### Phase 5 — Graphics Output and Mesa Gallium3D (Not Started)
+### Phase 5 -- graphics output and Mesa Gallium3D (not started)
 
-DRM/KMS subsystem, GEM/TTM memory manager, Mesa Gallium3D state tracker in user space.
+DRM/KMS subsystem integration for display init and video output management, GEM/TTM memory manager for framebuffer allocation, a minimal userspace Mesa Gallium3D state tracker.
 
 ## Building
 
-Requires installed headers for the current kernel.
+Requires the headers for your currently running kernel to be installed.
 
 ```bash
 git clone <repository-url>
@@ -66,22 +74,22 @@ cd nv-fermi-drv
 make
 ```
 
-## Loading the Module
+## Loading the module
 
 ```bash
 sudo make load
 ```
 
-If the card is already occupied by the standard driver (nouveau), unbind the device first:
+If the card is already claimed by the stock driver (nouveau), unbind it first:
 
 ```bash
 echo "0000:XX:00.0" | sudo tee /sys/bus/pci/drivers/nouveau/unbind
 echo "0000:XX:00.0" | sudo tee /sys/bus/pci/drivers/nv_fermi_drv/bind
 ```
 
-Find the device bus address using `lspci -nn | grep 10de`.
+Find the device's bus address with `lspci -nn | grep 10de`.
 
-## Viewing Logs
+## Viewing logs
 
 ```bash
 sudo make log
@@ -93,7 +101,7 @@ or directly:
 sudo dmesg -w | grep nv_fermi_drv
 ```
 
-## Unloading the Module
+## Unloading the module
 
 ```bash
 sudo make unload
@@ -101,7 +109,7 @@ sudo make unload
 
 ## Warning
 
-The project is in an early stage of development and interacts with undocumented NVIDIA hardware at the level of direct MMIO and VBIOS access. The current phases (1-3) are limited to read operations and do not make changes to the power or clock frequency state of the card. Starting from Phase 4, the driver will write to registers controlling voltage and frequencies — usage at that stage will be accompanied by additional safety warnings and restrictions.
+This project is at an early development stage and works with undocumented NVIDIA hardware via direct MMIO and VBIOS access. The current phases (1-3) are limited to read operations and do not change the card's power or clock state. Starting with Phase 4, the driver will write to registers controlling voltage and frequency -- use at that stage will come with additional warnings and safety guards.
 
 ## License
 
