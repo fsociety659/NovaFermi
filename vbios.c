@@ -168,22 +168,107 @@ static int nv_fermi_bit_find(struct nv_fermi_priv *priv, u8 id, struct nv_bit_to
 	return -ENOENT;
 }
 
+static bool nv_fermi_dcb_header_plausible(const u8 *p)
+{
+	u8 version = p[0];
+	u8 header_len = p[1];
+	u8 entry_count = p[2];
+	u8 entry_len = p[3];
+
+	if (version < 0x20 || version > 0x50)
+		return false;
+	if (header_len < 4 || header_len > 64)
+		return false;
+	if (entry_count < 1 || entry_count > 32)
+		return false;
+	if (entry_len != 1 && entry_len != 2 && entry_len != 4 &&
+	    entry_len != 8 && entry_len != 10)
+		return false;
+	return true;
+}
+
+static void nv_fermi_scan_dcb_candidates(struct nv_fermi_priv *priv, struct nv_bit_token *bit_i)
+{
+	size_t i;
+	size_t dump_len = min_t(size_t, (size_t)bit_i->length, 64);
+
+	pr_info(DRV_NAME ": BIT 'i' token: version=%u length=%u offset=0x%04x\n",
+		bit_i->version, bit_i->length, bit_i->offset);
+
+	if ((size_t)bit_i->offset + dump_len <= priv->vbios_len) {
+		pr_info(DRV_NAME ": BIT 'i' table raw dump (%zu bytes at 0x%04x):\n",
+			dump_len, bit_i->offset);
+		print_hex_dump(KERN_INFO, DRV_NAME ": bit_i ", DUMP_PREFIX_OFFSET,
+				16, 1, priv->vbios + bit_i->offset, dump_len, false);
+	}
+
+	for (i = 0; i + 2 <= dump_len; i += 2) {
+		size_t off = bit_i->offset + i;
+		u16 candidate;
+		const u8 *p;
+
+		if (off + 2 > priv->vbios_len)
+			break;
+		candidate = priv->vbios[off] | (priv->vbios[off + 1] << 8);
+
+		if (!candidate || (size_t)candidate + 4 > priv->vbios_len)
+			continue;
+
+		p = priv->vbios + candidate;
+		pr_info(DRV_NAME ": candidate @ bit_i+0x%02zx -> 0x%04x: version=0x%02x header_len=%u entry_count=%u entry_len=%u %s\n",
+			i, candidate, p[0], p[1], p[2], p[3],
+			nv_fermi_dcb_header_plausible(p) ? "PLAUSIBLE" : "");
+	}
+
+	if (priv->vbios_len > 0x38) {
+		u16 legacy = priv->vbios[0x36] | (priv->vbios[0x37] << 8);
+
+		if (legacy && (size_t)legacy + 4 <= priv->vbios_len) {
+			const u8 *p = priv->vbios + legacy;
+
+			pr_info(DRV_NAME ": legacy candidate @ 0x36 -> 0x%04x: version=0x%02x header_len=%u entry_count=%u entry_len=%u %s\n",
+				legacy, p[0], p[1], p[2], p[3],
+				nv_fermi_dcb_header_plausible(p) ? "PLAUSIBLE" : "");
+		}
+	}
+}
+
 int nv_fermi_parse_dcb(struct nv_fermi_priv *priv, struct nv_dcb_header *dcb)
 {
 	struct nv_bit_token bit_i;
+	u16 bit_i_off = 0;
+	u16 legacy_off = 0;
 	u16 dcb_off = 0;
+	bool bit_i_ok = false;
+	bool legacy_ok = false;
 	const u8 *p;
 
-	if (nv_fermi_bit_find(priv, 'i', &bit_i) == 0 && bit_i.length >= 2 &&
-	    (size_t)bit_i.offset + 2 <= priv->vbios_len) {
-		dcb_off = priv->vbios[bit_i.offset] | (priv->vbios[bit_i.offset + 1] << 8);
-		pr_info(DRV_NAME ": DCB pointer obtained from BIT token 'i': 0x%04x\n", dcb_off);
+	if (nv_fermi_bit_find(priv, 'i', &bit_i) == 0) {
+		nv_fermi_scan_dcb_candidates(priv, &bit_i);
+
+		if (bit_i.length >= 2 && (size_t)bit_i.offset + 2 <= priv->vbios_len) {
+			bit_i_off = priv->vbios[bit_i.offset] | (priv->vbios[bit_i.offset + 1] << 8);
+			if (bit_i_off && (size_t)bit_i_off + 4 <= priv->vbios_len)
+				bit_i_ok = nv_fermi_dcb_header_plausible(priv->vbios + bit_i_off);
+		}
 	}
 
-	if (!dcb_off && priv->vbios_len > 0x38) {
-		dcb_off = priv->vbios[0x36] | (priv->vbios[0x37] << 8);
-		pr_info(DRV_NAME ": BIT token 'i' gave no pointer, falling back to legacy offset 0x36: 0x%04x\n",
-			dcb_off);
+	if (priv->vbios_len > 0x38) {
+		legacy_off = priv->vbios[0x36] | (priv->vbios[0x37] << 8);
+		if (legacy_off && (size_t)legacy_off + 4 <= priv->vbios_len)
+			legacy_ok = nv_fermi_dcb_header_plausible(priv->vbios + legacy_off);
+	}
+
+	pr_info(DRV_NAME ": DCB candidate from BIT 'i': 0x%04x (%s), legacy 0x36: 0x%04x (%s)\n",
+		bit_i_off, bit_i_ok ? "plausible" : "not plausible",
+		legacy_off, legacy_ok ? "plausible" : "not plausible");
+
+	if (bit_i_ok) {
+		dcb_off = bit_i_off;
+		pr_info(DRV_NAME ": using DCB offset from BIT 'i' (plausible header)\n");
+	} else if (legacy_ok) {
+		dcb_off = legacy_off;
+		pr_info(DRV_NAME ": BIT 'i' pointer not plausible, using legacy offset 0x36 instead\n");
 	}
 
 	if (!dcb_off || (size_t)dcb_off + 4 > priv->vbios_len) {
@@ -205,6 +290,45 @@ int nv_fermi_parse_dcb(struct nv_fermi_priv *priv, struct nv_dcb_header *dcb)
 		pr_info(DRV_NAME ": DCB header raw dump (%u bytes):\n", dcb->header_len);
 		print_hex_dump(KERN_INFO, DRV_NAME ": dcb_hdr ", DUMP_PREFIX_OFFSET,
 				16, 1, p, dcb->header_len, false);
+	}
+
+	if (dcb->header_len >= 8) {
+		dcb->i2c_table_off = p[4] | (p[5] << 8);
+
+		pr_info(DRV_NAME ": DCB i2c_table_off=0x%04x (confirmed)\n", dcb->i2c_table_off);
+
+		if ((size_t)dcb->i2c_table_off + 32 <= priv->vbios_len) {
+			pr_info(DRV_NAME ": I2C table raw dump (32 bytes at 0x%04x):\n",
+				dcb->i2c_table_off);
+			print_hex_dump(KERN_INFO, DRV_NAME ": i2c_tbl ", DUMP_PREFIX_OFFSET,
+					16, 1, priv->vbios + dcb->i2c_table_off, 32, false);
+		} else {
+			pr_warn(DRV_NAME ": i2c_table_off=0x%04x out of bounds, skipping dump\n",
+				dcb->i2c_table_off);
+		}
+
+		pr_info(DRV_NAME ": header+0x06 (0x%04x) is confirmed NOT the GPIO table (executable code) -- scanning the rest of the header for candidates\n",
+			(unsigned)(p[6] | (p[7] << 8)));
+
+		{
+			size_t off;
+
+			for (off = 8; off + 2 <= dcb->header_len; off += 2) {
+				u16 candidate = p[off] | (p[off + 1] << 8);
+				const u8 *cp;
+
+				if (!candidate || (size_t)candidate + 4 > priv->vbios_len)
+					continue;
+
+				cp = priv->vbios + candidate;
+				pr_info(DRV_NAME ": gpio candidate @ dcb_hdr+0x%02zx -> 0x%04x: %02x %02x %02x %02x %s\n",
+					off, candidate, cp[0], cp[1], cp[2], cp[3],
+					nv_fermi_dcb_header_plausible(cp) ? "PLAUSIBLE" : "");
+			}
+		}
+	} else {
+		pr_warn(DRV_NAME ": DCB header_len=%u too small to contain i2c/gpio pointers\n",
+			dcb->header_len);
 	}
 
 	if (dcb->entry_count && dcb->entry_len) {
